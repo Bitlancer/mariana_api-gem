@@ -1,0 +1,31 @@
+#!/usr/bin/env ruby
+
+require 'bundler/setup'
+
+require 'mariana_api'
+require 'json'
+
+require 'pry'
+
+LOGGER = Logger.new($stdout)
+
+partner_creds = JSON.load(File.open('.partner_credentials'))
+
+if File.exist?('.user_token')
+  user_token = JSON.load(File.open('.user_token'))
+  subdomain = user_token.fetch('subdomain', 'example.sandbox')
+else
+  user_token = nil
+  subdomain = ENV.fetch('MARIANA_SUBDOMAIN', 'example.sandbox')
+end
+
+CLIENT = MarianaApi::Client.new(partner_creds, subdomain, user_token)
+CLIENT.on_token_refresh = Proc.new do |token|
+  LOGGER.info('Writing new token to local credential file')
+  cred_file = File.new('.user_token', 'w+')
+  JSON.dump(token, cred_file)
+  cred_file.close
+end
+CLIENT.logger = LOGGER
+
+Pry.start
