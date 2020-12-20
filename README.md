@@ -46,7 +46,7 @@ subdomain = 'example.sandbox'
 
 user_token = {
   access_token: "a12...",
-  created_at: 1600390842
+  created_at: 1600390842,
   expires_in: 7200,
   refresh_token: "ce2...",
   token_type: "Bearer"
