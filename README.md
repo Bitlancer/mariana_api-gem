@@ -12,11 +12,13 @@ Setup:
 ```shell
 cat <<EOF >.partner_credentials
 {
-  api_key: "1E0...",
-  client_id: "ha0...",
-  redirect_uri: "http://app.example.com/oauth/callback"
+  "api_key": "1E0...",
+  "client_id": "ha0...",
+  "redirect_uri": "http://app.example.com/oauth/callback"
 }
 EOF
+
+export MARIANA_SUBDOMAIN=example.sandbox
 
 ./bin/console
 [1] pry(main)> system("open \"#{CLIENT.get_authorize_url}\"")
