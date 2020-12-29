@@ -5,11 +5,13 @@ module MarianaApi::AdminApi::Resources
     end
 
     def list(params = {})
-      @http_client.get('/api/employee_public_profiles', params: params, auth_type: :none).force
+      auth_type = params.key?(:include) ? :auto : :none
+      @http_client.get('/api/employee_public_profiles', params: params, auth_type: auth_type).force
     end
 
     def read(id, params = {})
-      @http_client.get("/api/employee_public_profiles/#{id}", params: params, auth_type: :none)
+      auth_type = params.key?(:include) ? :auto : :none
+      @http_client.get("/api/employee_public_profiles/#{id}", params: params, auth_type: auth_type)
     end
   end
 end
