@@ -38,20 +38,12 @@ module MarianaApi
 
     def admin_api_client
       require_relative 'admin_api'
-      AdminApi::Client.new(
-        @partner_credentials,
-        @subdomain,
-        (@user_token.nil? ? nil : @user_token.to_hash)
-      )
+      AdminApi::Client.new(self)
     end
 
     def customer_api_client
       require_relative 'customer_api'
-      CustomerApi::Client.new(
-        @partner_credentials,
-        @subdomain,
-        (@user_token.nil? ? nil : @user_token.to_hash)
-      )
+      CustomerApi::Client.new(self)
     end
 
     def get(endpoint, params: {}, auth_type: :auto)

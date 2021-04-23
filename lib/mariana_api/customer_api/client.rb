@@ -4,12 +4,8 @@ module MarianaApi::CustomerApi
   class Client
     attr_reader :http_client
 
-    def initialize(partner_credentials, subdomain, user_token = nil)
-      @http_client = MarianaApi::Client.new(
-        partner_credentials,
-        subdomain,
-        user_token
-      )
+    def initialize(http_client)
+      @http_client = http_client
     end
   end
 end
