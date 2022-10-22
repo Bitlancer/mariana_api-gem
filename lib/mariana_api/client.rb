@@ -152,7 +152,7 @@ module MarianaApi
       resp = oauth_client.request(method, endpoint, Hash.new.tap do |opts|
         opts[:headers] = {}
         opts[:headers][:Authorization] = "Bearer #{token}" unless auth_type == :none
-        opts[:headers][:'Content-Type'] = 'application/json'
+        opts[:headers][:'Content-Type'] = 'application/json' unless %i(post put).include?(method)
         opts[:params] = params if params && %i(get delete).include?(method)
         opts[:body] = params.to_json if params && %i(post put).include?(method)
       end)
