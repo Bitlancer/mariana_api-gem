@@ -48,6 +48,7 @@ module MarianaApi
 
     def get(endpoint, params: {}, auth_type: :auto)
       params = { page_size: 100 }.merge(params)
+      params = params.map { |k, v| [k, v.is_a?(Array) ? v.join(',') : v] }.to_h
 
       resp = request(:get, endpoint, params: params, auth_type: auth_type)
       page_meta = resp.dig(:meta, :pagination)
