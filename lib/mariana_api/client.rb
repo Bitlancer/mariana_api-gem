@@ -5,7 +5,7 @@ require 'securerandom'
 
 module MarianaApi
   class Client
-    attr_accessor :logger
+    attr_accessor :logger, :http_logger
     attr_accessor :subdomain
     attr_accessor :on_api_request, :on_token_refresh
 
@@ -14,6 +14,7 @@ module MarianaApi
       user_token.transform_keys!(&:to_sym) unless user_token.nil?
 
       @logger = nil
+      @http_logger = nil
 
       @on_api_request = nil
       @on_token_refresh = nil
@@ -21,7 +22,7 @@ module MarianaApi
       for req_key in %i(client_id redirect_uri)
         raise "refresh_params must contain #{req_key}" unless partner_credentials.key?(req_key)
       end
-      @partner_credentials = partner_credentials 
+      @partner_credentials = partner_credentials
 
       @subdomain = subdomain
       raise 'subdomain must be set' if subdomain.nil?
@@ -150,13 +151,37 @@ module MarianaApi
                 nil
               end
 
-      resp = oauth_client.request(method, endpoint, Hash.new.tap do |opts|
+      req_opts = Hash.new.tap do |opts|
         opts[:headers] = {}
         opts[:headers][:Authorization] = "Bearer #{token}" unless auth_type == :none
         opts[:headers][:'Content-Type'] = 'application/json'
         opts[:params] = params if params && %i(get delete).include?(method)
         opts[:body] = params.to_json if params && %i(post put).include?(method)
-      end)
+      end
+
+      resp = nil
+      if method == :get
+        retries = 3; attempt = 1
+        while true
+          begin
+            resp = oauth_client.request(method, endpoint, req_opts)
+            break
+          rescue => ex
+            if ex.to_s =~ /timeout/i && attempt <= retries
+              retry_in = 2**attempt
+              unless @logger.nil?
+                @logger.warn "Request #{method} #{endpoint} #{params} failed with #{ex}. Retrying in #{retry_in} secs"
+              end
+              sleep(retry_in)
+              attempt += 1
+            else
+              raise
+            end
+          end
+        end
+      else
+        resp = oauth_client.request(method, endpoint, req_opts)
+      end
 
       JSON.parse(resp.body, symbolize_names: true)
     end
@@ -193,7 +218,7 @@ module MarianaApi
     end
 
     def oauth_pkce_params(code_verifier: nil, state: nil)
-      @oauth_pkce_params = {} 
+      @oauth_pkce_params = {}
       @oauth_pkce_params[:state] = state || SecureRandom.hex(24)
       @oauth_pkce_params[:code_verifier] = code_verifier || SecureRandom.hex(64)
       @oauth_pkce_params[:code_challenge] = Base64.urlsafe_encode64(
@@ -212,8 +237,10 @@ module MarianaApi
         authorize_url: '/o/authorize',
         token_url: '/o/token',
         token_method: :post_with_query_string,
-        logger: @logger
-      )
+        logger: @http_logger
+      ) do |faraday_conn|
+        faraday_conn.options.timeout = 90
+      end
       @oauth_client
     end
 
