@@ -28,4 +28,10 @@ CLIENT.on_token_refresh = Proc.new do |token|
 end
 CLIENT.logger = LOGGER
 
+puts "Launched for subdomain: #{subdomain}"
+puts "Using credentials: #{user_token.nil? ? 'Partner API key' : 'User Token'}"
+puts
+puts "Hint: try CLIENT.admin_api_client.resources.locations.list"
+puts
+
 Pry.start

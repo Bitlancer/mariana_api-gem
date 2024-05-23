@@ -5,7 +5,7 @@ module MarianaApi::AdminApi::Resources
     end
 
     def list(params = {})
-      @http_client.get('/api/credits', params: params).force
+      @http_client.get('/api/credits', params: params)
     end
 
     def read(id, params = {})

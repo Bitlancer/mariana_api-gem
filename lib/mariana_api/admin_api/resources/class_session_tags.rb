@@ -5,7 +5,7 @@ module MarianaApi::AdminApi::Resources
     end
 
     def list(params = {})
-      @http_client.get('/api/class_session_tags', params: params).force
+      @http_client.get('/api/class_session_tags', params: params)
     end
 
     def read(id, params = {})

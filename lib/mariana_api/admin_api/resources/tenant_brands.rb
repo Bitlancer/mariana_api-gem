@@ -5,7 +5,7 @@ module MarianaApi::AdminApi::Resources
     end
 
     def list(params = {})
-      @http_client.get('/api/tenant_brands', params: params, auth_type: :none).force
+      @http_client.get('/api/tenant_brands', params: params, auth_type: :none)
     end
 
     def read(id, params = {})
