@@ -158,12 +158,12 @@ module MarianaApi
     def api_request(method, endpoint, opts = {})
       raise 'invalid method' unless %i[get post].include?(method)
 
-      opts = opts.merge(
+      opts = {
         auth_type: :auto,
         retry_limit: 0,
         retry_delay: 2,
         retry_attempt: 0
-      )
+      }.merge(opts)
 
       auth_type = opts[:auth_type]
       raise 'invalid auth type' unless %i[auto token api_key none].include?(auth_type) 
