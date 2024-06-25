@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'async'
 require 'async/semaphore'
 require 'logger'
@@ -10,20 +12,18 @@ module MarianaApi
   class Client
     REQUEST_TIMEOUT = 90
 
-    attr_accessor :logger, :log_http_transactions
-    attr_accessor :subdomain
-    attr_accessor :on_token_refresh
+    attr_accessor :logger, :log_http_transactions, :subdomain, :on_token_refresh
 
     def initialize(partner_credentials, subdomain, user_token = nil)
       partner_credentials.transform_keys!(&:to_sym)
-      user_token.transform_keys!(&:to_sym) unless user_token.nil?
+      user_token&.transform_keys!(&:to_sym)
 
-      @logger = Logger.new(STDOUT)
+      @logger = Logger.new($stdout)
       @log_http_transactions = false
 
       @on_token_refresh = nil
 
-      for req_key in %i(client_id redirect_uri)
+      %i[client_id redirect_uri].each do |req_key|
         raise "refresh_params must contain #{req_key}" unless partner_credentials.key?(req_key)
       end
       @partner_credentials = partner_credentials
@@ -32,13 +32,13 @@ module MarianaApi
       raise 'subdomain must be set' if subdomain.nil?
 
       @user_token = nil
-      unless user_token.nil?
-        for req_key in %i(refresh_token)
-          raise "user_token must contain #{req_key}" unless user_token.key?(req_key)
-        end
-        user_token.merge!({ expires_latency: 60 })
-        @user_token = OAuth2::AccessToken.from_hash(oauth_client, user_token)
+      return if user_token.nil?
+
+      %i[refresh_token].each do |req_key|
+        raise "user_token must contain #{req_key}" unless user_token.key?(req_key)
       end
+      user_token.merge!({ expires_latency: 60 })
+      @user_token = OAuth2::AccessToken.from_hash(oauth_client, user_token)
     end
 
     def admin_api_client
@@ -53,7 +53,7 @@ module MarianaApi
 
     def get(endpoint, params: {}, auth_type: :auto, retries: 3, concurrency: 4)
       params = { page_size: 100 }.merge(params)
-      params = params.map { |k, v| [k, v.is_a?(Array) ? v.join(',') : v] }.to_h
+      params = params.transform_values { |v| v.is_a?(Array) ? v.join(',') : v }
 
       includes = params.key?(:include) ? params[:include].split(',') : []
 
@@ -67,7 +67,7 @@ module MarianaApi
       responses << api_request(:get, endpoint, opts)
 
       page_meta = responses[0].dig(:meta, :pagination)
-      
+
       if page_meta.nil?
         return data_merge_included(
           [responses[0][:data]],
@@ -82,7 +82,7 @@ module MarianaApi
       Async do
         semaphore = Async::Semaphore.new(concurrency)
         responses += (2..pages).map do |page|
-          semaphore.async do |task|
+          semaphore.async do |_task|
             task_opts = opts.dup
             task_opts[:query][:page] = page
             api_request(:get, endpoint, task_opts)
@@ -94,9 +94,7 @@ module MarianaApi
         data_merge_included(resp[:data], includes, resp[:included])
       end.flatten
 
-      if data.size != total_count
-        raise "Assertion error: data size #{data.size} != pagination count #{total_count}"
-      end
+      raise "Assertion error: data size #{data.size} != pagination count #{total_count}" if data.size != total_count
 
       data
     end
@@ -116,14 +114,16 @@ module MarianaApi
       data.each do |obj|
         includes.each do |include_key|
           next if include_key.include?('.')
+
           rel_objs_wrapper = obj[:relationships][include_key.to_sym]
           next if rel_objs_wrapper[:data].nil? || rel_objs_wrapper[:data].empty?
+
           rel_objs = if rel_objs_wrapper[:data].is_a?(Array)
                        rel_objs_wrapper[:data]
                      else
                        [rel_objs_wrapper[:data]]
                      end
-          rel_objs_type = rel_objs.first[:type].to_sym
+          rel_objs.first[:type].to_sym
           rel_objs.each do |rel_obj|
             type = rel_obj[:type].to_sym
             id = rel_obj[:id].to_sym
@@ -150,7 +150,7 @@ module MarianaApi
     def post(endpoint, body: {}, auth_type: :auto)
       opts = {
         auth_type: auth_type,
-        body: body,
+        body: body
       }
       api_request(:post, endpoint, opts)
     end
@@ -166,7 +166,8 @@ module MarianaApi
       }.merge(opts)
 
       auth_type = opts[:auth_type]
-      raise 'invalid auth type' unless %i[auto token api_key none].include?(auth_type) 
+      raise 'invalid auth type' unless %i[auto token api_key none].include?(auth_type)
+
       if auth_type == :auto
         auth_type = if !@user_token.nil?
                       :token
@@ -181,11 +182,9 @@ module MarianaApi
                 get_user_token[:access_token]
               elsif auth_type == :api_key
                 @partner_credentials[:api_key]
-              else
-                nil
               end
 
-      uri = URI(!!(endpoint =~ /^http(s)?:\/\//) ? endpoint : api_endpoint(endpoint))
+      uri = URI(!(endpoint =~ %r{^http(s)?://}).nil? ? endpoint : api_endpoint(endpoint))
       uri.query = URI.encode_www_form(opts[:query]) if opts.key?(:query)
 
       client = Net::HTTP.new(uri.host, uri.port, nil)
@@ -208,14 +207,14 @@ module MarianaApi
       begin
         response = client.request(request)
         response_code = response.code.to_i
-        raise Net::HTTPRetriableError.new(response.body, response) if (response_code == 429 || response_code >= 500)
-      rescue Net::HTTPRetriableError, Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => ex
+        raise Net::HTTPRetriableError.new(response.body, response) if response_code == 429 || response_code >= 500
+      rescue Net::HTTPRetriableError, Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
         if opts[:retry_attempt] < opts[:retry_limit]
           opts[:retry_attempt] += 1
           retry_in = opts[:retry_delay]**opts[:retry_attempt]
-          @logger.warn("Retrying request #{method} #{uri} in #{retry_in} secs that failed with: #{ex.inspect}")
+          @logger.warn("Retrying request #{method} #{uri} in #{retry_in} secs that failed with: #{e.inspect}")
           sleep(retry_in)
-          return self.api_request(method, uri.to_s, opts)
+          return api_request(method, uri.to_s, opts)
         end
         raise
       end
@@ -233,10 +232,11 @@ module MarianaApi
         )
       else
         raise 'user_token is not set' if @user_token.nil?
+
         if @user_token.expired?
           @user_token = @user_token.refresh!
           token_hash = @user_token.to_hash.merge({ subdomain: @subdomain })
-          @on_token_refresh.call(token_hash) unless @on_token_refresh.nil?
+          @on_token_refresh&.call(token_hash)
         end
       end
 
@@ -246,12 +246,12 @@ module MarianaApi
     def get_authorize_url(pkce_params: nil, scopes: 'read:account')
       pkce_params = oauth_pkce_params if pkce_params.nil?
       oauth_client.auth_code.authorize_url({
-        code_challenge: pkce_params[:code_challenge],
-        code_challenge_method: pkce_params[:code_challenge_method],
-        state: pkce_params[:state],
-        redirect_uri: @partner_credentials[:redirect_uri],
-        scope: scopes
-      })
+                                             code_challenge: pkce_params[:code_challenge],
+                                             code_challenge_method: pkce_params[:code_challenge_method],
+                                             state: pkce_params[:state],
+                                             redirect_uri: @partner_credentials[:redirect_uri],
+                                             scope: scopes
+                                           })
     end
 
     def oauth_pkce_params(code_verifier: nil, state: nil)
@@ -260,7 +260,7 @@ module MarianaApi
       @oauth_pkce_params[:code_verifier] = code_verifier || SecureRandom.hex(64)
       @oauth_pkce_params[:code_challenge] = Base64.urlsafe_encode64(
         Digest::SHA2.digest(@oauth_pkce_params[:code_verifier]),
-        :padding => false,
+        padding: false
       )
       @oauth_pkce_params[:code_challenge_method] = 'S256'
       @oauth_pkce_params.freeze
@@ -274,7 +274,7 @@ module MarianaApi
         authorize_url: '/o/authorize',
         token_url: '/o/token',
         token_method: :post_with_query_string,
-        logger: (@log_http_transactions ? @logger : nil) 
+        logger: (@log_http_transactions ? @logger : nil)
       ) do |faraday_conn|
         faraday_conn.options.timeout = REQUEST_TIMEOUT
       end
@@ -289,9 +289,9 @@ module MarianaApi
       begin
         resp = Net::HTTP.get(URI("https://#{subdomain}.marianatek.com/api/"))
         return resp.code.to_i == 200
-      rescue
+      rescue StandardError
       end
-      return false
+      false
     end
   end
 end

@@ -1,17 +1,23 @@
-module MarianaApi::AdminApi::Resources
-  class EmployeePublicProfiles
-    def initialize(http_client)
-      @http_client = http_client
-    end
+# frozen_string_literal: true
 
-    def list(params = {})
-      auth_type = params.key?(:include) ? :auto : :none
-      @http_client.get('/api/employee_public_profiles', params: params, auth_type: auth_type)
-    end
+module MarianaApi
+  module AdminApi
+    module Resources
+      class EmployeePublicProfiles
+        def initialize(http_client)
+          @http_client = http_client
+        end
 
-    def read(id, params = {})
-      auth_type = params.key?(:include) ? :auto : :none
-      @http_client.get("/api/employee_public_profiles/#{id}", params: params, auth_type: auth_type)
+        def list(params = {})
+          auth_type = params.key?(:include) ? :auto : :none
+          @http_client.get('/api/employee_public_profiles', params: params, auth_type: auth_type)
+        end
+
+        def read(id, params = {})
+          auth_type = params.key?(:include) ? :auto : :none
+          @http_client.get("/api/employee_public_profiles/#{id}", params: params, auth_type: auth_type)
+        end
+      end
     end
   end
 end

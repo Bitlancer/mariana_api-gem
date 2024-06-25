@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 
 require 'bundler/setup'
 
@@ -9,10 +10,10 @@ require 'pry'
 
 LOGGER = Logger.new($stdout)
 
-partner_creds = JSON.load(File.open('.partner_credentials'))
+partner_creds = JSON.parse(File.open('.partner_credentials'))
 
 if File.exist?('.user_token')
-  user_token = JSON.load(File.open('.user_token'))
+  user_token = JSON.parse(File.open('.user_token'))
   subdomain = user_token.fetch('subdomain', 'example.sandbox')
 else
   user_token = nil
@@ -20,7 +21,7 @@ else
 end
 
 CLIENT = MarianaApi::Client.new(partner_creds, subdomain, user_token)
-CLIENT.on_token_refresh = Proc.new do |token|
+CLIENT.on_token_refresh = proc do |token|
   LOGGER.info('Writing new token to local credential file')
   cred_file = File.new('.user_token', 'w+')
   JSON.dump(token, cred_file)
@@ -31,7 +32,7 @@ CLIENT.logger = LOGGER
 puts "Launched for subdomain: #{subdomain}"
 puts "Using credentials: #{user_token.nil? ? 'Partner API key' : 'User Token'}"
 puts
-puts "Hint: try CLIENT.admin_api_client.resources.locations.list"
+puts 'Hint: try CLIENT.admin_api_client.resources.locations.list'
 puts
 
 Pry.start
