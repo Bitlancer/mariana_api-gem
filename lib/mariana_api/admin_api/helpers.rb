@@ -1,3 +1,9 @@
-module MarianaApi::AdminApi::Helpers; end
+# frozen_string_literal: true
 
-Dir[File.dirname(__FILE__) + '/helpers/*.rb'].each { |file| require file }
+module MarianaApi
+  module AdminApi
+    module Helpers; end
+  end
+end
+
+Dir["#{File.dirname(__FILE__)}/helpers/*.rb"].each { |file| require file }

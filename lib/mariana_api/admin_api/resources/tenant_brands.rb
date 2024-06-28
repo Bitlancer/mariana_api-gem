@@ -1,15 +1,21 @@
-module MarianaApi::AdminApi::Resources
-  class TenantBrands
-    def initialize(http_client)
-      @http_client = http_client
-    end
+# frozen_string_literal: true
 
-    def list(params = {})
-      @http_client.get('/api/tenant_brands', params: params, auth_type: :none).force
-    end
+module MarianaApi
+  module AdminApi
+    module Resources
+      class TenantBrands
+        def initialize(http_client)
+          @http_client = http_client
+        end
 
-    def read(id, params = {})
-      @http_client.get("/api/tenant_brands/#{id}", params: params, auth_type: :none)
+        def list(params = {})
+          @http_client.get('/api/tenant_brands', params: params, auth_type: :none)
+        end
+
+        def read(id, params = {})
+          @http_client.get("/api/tenant_brands/#{id}", params: params, auth_type: :none)
+        end
+      end
     end
   end
 end

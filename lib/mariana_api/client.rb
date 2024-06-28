@@ -1,25 +1,29 @@
-require 'faraday'
+# frozen_string_literal: true
+
+require 'async'
+require 'async/semaphore'
+require 'logger'
+require 'net/http'
 require 'oauth2'
 require 'ostruct'
 require 'securerandom'
 
 module MarianaApi
   class Client
-    attr_accessor :logger, :http_logger
-    attr_accessor :subdomain
-    attr_accessor :on_api_request, :on_token_refresh
+    REQUEST_TIMEOUT = 90
+
+    attr_accessor :logger, :log_http_transactions, :subdomain, :on_token_refresh
 
     def initialize(partner_credentials, subdomain, user_token = nil)
       partner_credentials.transform_keys!(&:to_sym)
-      user_token.transform_keys!(&:to_sym) unless user_token.nil?
+      user_token&.transform_keys!(&:to_sym)
 
-      @logger = nil
-      @http_logger = nil
+      @logger = Logger.new($stdout)
+      @log_http_transactions = false
 
-      @on_api_request = nil
       @on_token_refresh = nil
 
-      for req_key in %i(client_id redirect_uri)
+      %i[client_id redirect_uri].each do |req_key|
         raise "refresh_params must contain #{req_key}" unless partner_credentials.key?(req_key)
       end
       @partner_credentials = partner_credentials
@@ -28,13 +32,13 @@ module MarianaApi
       raise 'subdomain must be set' if subdomain.nil?
 
       @user_token = nil
-      unless user_token.nil?
-        for req_key in %i(refresh_token)
-          raise "user_token must contain #{req_key}" unless user_token.key?(req_key)
-        end
-        user_token.merge!({ expires_latency: 60 })
-        @user_token = OAuth2::AccessToken.from_hash(oauth_client, user_token)
+      return if user_token.nil?
+
+      %i[refresh_token].each do |req_key|
+        raise "user_token must contain #{req_key}" unless user_token.key?(req_key)
       end
+      user_token.merge!({ expires_latency: 60 })
+      @user_token = OAuth2::AccessToken.from_hash(oauth_client, user_token)
     end
 
     def admin_api_client
@@ -47,34 +51,52 @@ module MarianaApi
       CustomerApi::Client.new(self)
     end
 
-    def get(endpoint, params: {}, auth_type: :auto)
+    def get(endpoint, params: {}, auth_type: :auto, retries: 3, concurrency: 4)
       params = { page_size: 100 }.merge(params)
-      params = params.map { |k, v| [k, v.is_a?(Array) ? v.join(',') : v] }.to_h
-
-      resp = request(:get, endpoint, params: params, auth_type: auth_type)
-      page_meta = resp.dig(:meta, :pagination)
+      params = params.transform_values { |v| v.is_a?(Array) ? v.join(',') : v }
 
       includes = params.key?(:include) ? params[:include].split(',') : []
 
+      opts = {}
+      opts[:retry_limit] = retries
+      opts[:auth_type] = auth_type
+      opts[:query] = params
+
+      responses = []
+
+      responses << api_request(:get, endpoint, opts)
+
+      page_meta = responses[0].dig(:meta, :pagination)
+
       if page_meta.nil?
         return data_merge_included(
-          [resp[:data]],
+          [responses[0][:data]],
           includes,
-          resp[:included]
+          responses[0][:included]
         ).first
       end
 
-      Enumerator.new do |yielder|
-        loop do
-          data = data_merge_included(resp[:data], includes, resp[:included])
-          data.each { |obj| yielder.yield obj }
+      pages = page_meta[:pages]
+      total_count = page_meta[:count]
 
-          break if page_meta[:page] >= page_meta[:pages]
-          params[:page] = page_meta[:page] + 1
-          resp = request(:get, endpoint, params: params, auth_type: auth_type)
-          page_meta = resp[:meta][:pagination]
-        end
-      end.lazy
+      Async do
+        semaphore = Async::Semaphore.new(concurrency)
+        responses += (2..pages).map do |page|
+          semaphore.async do |_task|
+            task_opts = opts.dup
+            task_opts[:query][:page] = page
+            api_request(:get, endpoint, task_opts)
+          end
+        end.map(&:wait)
+      end
+
+      data = responses.map do |resp|
+        data_merge_included(resp[:data], includes, resp[:included])
+      end.flatten
+
+      raise "Assertion error: data size #{data.size} != pagination count #{total_count}" if data.size != total_count
+
+      data
     end
 
     def data_merge_included(data, includes, included_data)
@@ -92,14 +114,16 @@ module MarianaApi
       data.each do |obj|
         includes.each do |include_key|
           next if include_key.include?('.')
+
           rel_objs_wrapper = obj[:relationships][include_key.to_sym]
           next if rel_objs_wrapper[:data].nil? || rel_objs_wrapper[:data].empty?
+
           rel_objs = if rel_objs_wrapper[:data].is_a?(Array)
                        rel_objs_wrapper[:data]
                      else
                        [rel_objs_wrapper[:data]]
                      end
-          rel_objs_type = rel_objs.first[:type].to_sym
+          rel_objs.first[:type].to_sym
           rel_objs.each do |rel_obj|
             type = rel_obj[:type].to_sym
             id = rel_obj[:id].to_sym
@@ -123,15 +147,26 @@ module MarianaApi
       data
     end
 
-    def post(*args, **kwargs)
-      request(:post, *args, **kwargs)
+    def post(endpoint, body: {}, auth_type: :auto)
+      opts = {
+        auth_type: auth_type,
+        body: body
+      }
+      api_request(:post, endpoint, opts)
     end
 
-    def request(method, endpoint, params: nil, auth_type: :auto)
-      raise 'invalid method' unless %i[get post put patch delete]
-      raise 'invalid auth type' unless %i[auto token api_key none]
+    def api_request(method, endpoint, opts = {})
+      raise 'invalid method' unless %i[get post].include?(method)
 
-      @on_api_request.call(method, endpoint, params) unless @on_api_request.nil?
+      opts = {
+        auth_type: :auto,
+        retry_limit: 0,
+        retry_delay: 2,
+        retry_attempt: 0
+      }.merge(opts)
+
+      auth_type = opts[:auth_type]
+      raise 'invalid auth type' unless %i[auto token api_key none].include?(auth_type)
 
       if auth_type == :auto
         auth_type = if !@user_token.nil?
@@ -147,43 +182,44 @@ module MarianaApi
                 get_user_token[:access_token]
               elsif auth_type == :api_key
                 @partner_credentials[:api_key]
-              else
-                nil
               end
 
-      req_opts = Hash.new.tap do |opts|
-        opts[:headers] = {}
-        opts[:headers][:Authorization] = "Bearer #{token}" unless auth_type == :none
-        opts[:headers][:'Content-Type'] = 'application/json'
-        opts[:params] = params if params && %i(get delete).include?(method)
-        opts[:body] = params.to_json if params && %i(post put).include?(method)
-      end
+      uri = URI(!(endpoint =~ %r{^http(s)?://}).nil? ? endpoint : api_endpoint(endpoint))
+      uri.query = URI.encode_www_form(opts[:query]) if opts.key?(:query)
 
-      resp = nil
-      if method == :get
-        retries = 3; attempt = 1
-        while true
-          begin
-            resp = oauth_client.request(method, endpoint, req_opts)
-            break
-          rescue => ex
-            if ex.to_s =~ /timeout/i && attempt <= retries
-              retry_in = 2**attempt
-              unless @logger.nil?
-                @logger.warn "Request #{method} #{endpoint} #{params} failed with #{ex}. Retrying in #{retry_in} secs"
-              end
-              sleep(retry_in)
-              attempt += 1
-            else
-              raise
-            end
-          end
+      client = Net::HTTP.new(uri.host, uri.port, nil)
+      client.set_debug_output($stdout) if @log_http_transactions
+      client.use_ssl = true
+      client.open_timeout = REQUEST_TIMEOUT
+      client.read_timeout = REQUEST_TIMEOUT
+
+      request = nil
+      request = Net::HTTP::Get.new(uri) if method == :get
+      request = Net::HTTP::Post.new(uri) if method == :post
+
+      request['Authorization'] = "Bearer #{token}" unless token.nil?
+      request['Content-Type'] = 'application/json'
+
+      request.body = opts[:body] if opts.key?(:body)
+
+      @logger.info("HTTP request: #{method} #{uri}")
+      response = nil
+      begin
+        response = client.request(request)
+        response_code = response.code.to_i
+        raise Net::HTTPRetriableError.new(response.body, response) if response_code == 429 || response_code >= 500
+      rescue Net::HTTPRetriableError, Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
+        if opts[:retry_attempt] < opts[:retry_limit]
+          opts[:retry_attempt] += 1
+          retry_in = opts[:retry_delay]**opts[:retry_attempt]
+          @logger.warn("Retrying request #{method} #{uri} in #{retry_in} secs that failed with: #{e.inspect}")
+          sleep(retry_in)
+          return api_request(method, uri.to_s, opts)
         end
-      else
-        resp = oauth_client.request(method, endpoint, req_opts)
+        raise
       end
 
-      JSON.parse(resp.body, symbolize_names: true)
+      JSON.parse(response.body, symbolize_names: true)
     end
 
     def get_user_token(auth_code: nil, code_verifier: nil)
@@ -196,10 +232,11 @@ module MarianaApi
         )
       else
         raise 'user_token is not set' if @user_token.nil?
+
         if @user_token.expired?
           @user_token = @user_token.refresh!
           token_hash = @user_token.to_hash.merge({ subdomain: @subdomain })
-          @on_token_refresh.call(token_hash) unless @on_token_refresh.nil?
+          @on_token_refresh&.call(token_hash)
         end
       end
 
@@ -209,12 +246,12 @@ module MarianaApi
     def get_authorize_url(pkce_params: nil, scopes: 'read:account')
       pkce_params = oauth_pkce_params if pkce_params.nil?
       oauth_client.auth_code.authorize_url({
-        code_challenge: pkce_params[:code_challenge],
-        code_challenge_method: pkce_params[:code_challenge_method],
-        state: pkce_params[:state],
-        redirect_uri: @partner_credentials[:redirect_uri],
-        scope: scopes
-      })
+                                             code_challenge: pkce_params[:code_challenge],
+                                             code_challenge_method: pkce_params[:code_challenge_method],
+                                             state: pkce_params[:state],
+                                             redirect_uri: @partner_credentials[:redirect_uri],
+                                             scope: scopes
+                                           })
     end
 
     def oauth_pkce_params(code_verifier: nil, state: nil)
@@ -223,7 +260,7 @@ module MarianaApi
       @oauth_pkce_params[:code_verifier] = code_verifier || SecureRandom.hex(64)
       @oauth_pkce_params[:code_challenge] = Base64.urlsafe_encode64(
         Digest::SHA2.digest(@oauth_pkce_params[:code_verifier]),
-        :padding => false,
+        padding: false
       )
       @oauth_pkce_params[:code_challenge_method] = 'S256'
       @oauth_pkce_params.freeze
@@ -237,24 +274,24 @@ module MarianaApi
         authorize_url: '/o/authorize',
         token_url: '/o/token',
         token_method: :post_with_query_string,
-        logger: @http_logger
+        logger: (@log_http_transactions ? @logger : nil)
       ) do |faraday_conn|
-        faraday_conn.options.timeout = 90
+        faraday_conn.options.timeout = REQUEST_TIMEOUT
       end
       @oauth_client
     end
 
-    def api_endpoint
-      "https://#{@subdomain}.marianatek.com"
+    def api_endpoint(endpoint = '')
+      "https://#{@subdomain}.marianatek.com" + endpoint
     end
 
     def self.valid_subdomain?(subdomain)
       begin
-        resp = Faraday.get "https://#{subdomain}.marianatek.com/api/"
-        return resp.status == 200
-      rescue
+        resp = Net::HTTP.get(URI("https://#{subdomain}.marianatek.com/api/"))
+        return resp.code.to_i == 200
+      rescue StandardError
       end
-      return false
+      false
     end
   end
 end

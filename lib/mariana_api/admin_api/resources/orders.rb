@@ -1,15 +1,21 @@
-module MarianaApi::AdminApi::Resources
-  class Orders
-    def initialize(http_client)
-      @http_client = http_client
-    end
+# frozen_string_literal: true
 
-    def list(params = {})
-      @http_client.get('/api/orders', params: params).force
-    end
+module MarianaApi
+  module AdminApi
+    module Resources
+      class Orders
+        def initialize(http_client)
+          @http_client = http_client
+        end
 
-    def read(id, params = {})
-      @http_client.get("/api/orders/#{id}", params: params)
+        def list(params = {})
+          @http_client.get('/api/orders', params: params)
+        end
+
+        def read(id, params = {})
+          @http_client.get("/api/orders/#{id}", params: params)
+        end
+      end
     end
   end
 end
