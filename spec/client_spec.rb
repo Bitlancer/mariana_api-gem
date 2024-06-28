@@ -14,6 +14,22 @@ describe 'Client' do
     @client.logger = Logger.new('/dev/null')
   end
 
+  describe '#valid_subdomain' do
+    it 'returns true for valid subdomain' do
+      stub_request(:get, 'https://valid.marianatek.com/api/')
+        .to_return(status: 200)
+
+      expect(@client.class.valid_subdomain?('valid')).to be true
+    end
+
+    it 'returns false for invalid subdomain' do
+      stub_request(:get, 'https://invalid.marianatek.com/api/')
+        .to_return(status: 404)
+
+      expect(@client.class.valid_subdomain?('invalid')).to be false
+    end
+  end
+
   describe '#get' do
     it 'passes authentication' do
       stub_request(:get, 'https://test.marianatek.com/api/users?page_size=100')

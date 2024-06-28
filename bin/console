@@ -10,7 +10,7 @@ require 'pry'
 
 LOGGER = Logger.new($stdout)
 
-partner_creds = JSON.parse(File.open('.partner_credentials'))
+partner_creds = JSON.parse(File.read('.partner_credentials'))
 
 if File.exist?('.user_token')
   user_token = JSON.parse(File.open('.user_token'))

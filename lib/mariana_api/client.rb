@@ -287,7 +287,7 @@ module MarianaApi
 
     def self.valid_subdomain?(subdomain)
       begin
-        resp = Net::HTTP.get(URI("https://#{subdomain}.marianatek.com/api/"))
+        resp = Net::HTTP.get_response(URI("https://#{subdomain}.marianatek.com/api/"))
         return resp.code.to_i == 200
       rescue StandardError
       end
