@@ -52,7 +52,7 @@ module MarianaApi
     end
 
     def get(endpoint, params: {}, auth_type: :auto, retries: 3, concurrency: 4)
-      params = { page_size: 100 }.merge(params)
+      params[:page_size] = 100 unless params.key?(:page_size) || params.key?(:per_page)
       params = params.transform_values { |v| v.is_a?(Array) ? v.join(',') : v }
 
       includes = params.key?(:include) ? params[:include].split(',') : []
@@ -76,8 +76,10 @@ module MarianaApi
         ).first
       end
 
-      pages = page_meta[:pages]
-      total_count = page_meta[:count]
+      # Most of the admin API usage "pages" and "count".
+      # The appointments API uses "page_count" and "total".
+      pages = page_meta[:pages] || page_meta[:page_count]
+      total_count = page_meta[:count] || page_meta[:total]
 
       Async do
         semaphore = Async::Semaphore.new(concurrency)
