@@ -103,6 +103,7 @@ module MarianaApi
 
     def data_merge_included(data, includes, included_data)
       return data if includes.empty?
+      return data if included_data.nil?
 
       if included_data.is_a?(Hash)
         included_data_map = included_data
