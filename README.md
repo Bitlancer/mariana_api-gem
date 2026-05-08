@@ -14,6 +14,7 @@ cat <<EOF >.partner_credentials
 {
   "api_key": "1E0...",
   "client_id": "ha0...",
+  "client_secret": "shh...",
   "redirect_uri": "http://app.example.com/oauth/callback"
 }
 EOF
@@ -41,6 +42,7 @@ export OAUTH_DEBUG=true  # To debug HTTP calls
 partner_creds = {
   api_key: "1E0...",
   client_id: "ha0...",
+  client_secret: "shh...",
   redirect_uri: "https://app.example.com/oauth/callback"
 }
 
