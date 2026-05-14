@@ -10,11 +10,15 @@ require 'pry'
 
 LOGGER = Logger.new($stdout)
 
-partner_creds = JSON.parse(File.read('.partner_credentials'))
+def read_json_file(path)
+  JSON.parse(File.read(path))
+end
+
+partner_creds = read_json_file('.partner_credentials')
 
 if File.exist?('.user_token')
-  user_token = JSON.parse(File.open('.user_token'))
-  subdomain = user_token.fetch('subdomain', 'example.sandbox')
+  user_token = read_json_file('.user_token')
+  subdomain = user_token.fetch('subdomain', ENV.fetch('MARIANA_SUBDOMAIN', 'example.sandbox'))
 else
   user_token = nil
   subdomain = ENV.fetch('MARIANA_SUBDOMAIN', 'example.sandbox')

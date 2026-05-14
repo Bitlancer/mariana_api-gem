@@ -58,4 +58,40 @@ describe 'Client' do
       expect(locations.first[:relationships][:region][:data][:attributes][:name]).to eql('New York')
     end
   end
+
+  describe '#get_user_token' do
+    it 'passes client_secret and redirect_uri for confidential clients' do
+      credentials = {
+        client_id: '$CLIENT_ID$',
+        client_secret: '$CLIENT_SECRET$',
+        redirect_uri: 'http://localhost:3000'
+      }
+      client = MarianaApi::Client.new(credentials, 'test')
+
+      auth_code = instance_double('OAuth2::Strategy::AuthCode')
+      oauth_client = instance_double('OAuth2::Client', id: '$CLIENT_ID$', auth_code: auth_code)
+
+      allow(client).to receive(:oauth_client).and_return(oauth_client)
+      expect(auth_code).to receive(:get_token).with(
+        'auth-code',
+        hash_including(
+          client_id: '$CLIENT_ID$',
+          client_secret: '$CLIENT_SECRET$',
+          code_verifier: 'verifier',
+          redirect_uri: 'http://localhost:3000'
+        )
+      )
+
+      client.get_user_token(auth_code: 'auth-code', code_verifier: 'verifier')
+    end
+  end
+
+  describe '#oauth_client' do
+    it 'uses request_body auth for token requests' do
+      oauth_client = @client.send(:oauth_client)
+
+      expect(oauth_client.options[:auth_scheme]).to eq(:request_body)
+      expect(oauth_client.options[:token_method]).to eq(:post_with_query_string)
+    end
+  end
 end

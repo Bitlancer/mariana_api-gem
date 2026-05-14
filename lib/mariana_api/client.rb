@@ -228,11 +228,14 @@ module MarianaApi
     def get_user_token(auth_code: nil, code_verifier: nil)
       if !auth_code.nil?
         code_verifier = @oauth_pkce_params[:code_verifier] if code_verifier.nil?
-        @user_token = oauth_client.auth_code.get_token(
-          auth_code,
+        token_params = {
           client_id: oauth_client.id,
-          code_verifier: code_verifier
-        )
+          redirect_uri: @partner_credentials[:redirect_uri]
+        }
+        token_params[:code_verifier] = code_verifier unless code_verifier.nil?
+        token_params[:client_secret] = @partner_credentials[:client_secret] if @partner_credentials.key?(:client_secret)
+
+        @user_token = oauth_client.auth_code.get_token(auth_code, token_params)
       else
         raise 'user_token is not set' if @user_token.nil?
 
@@ -272,10 +275,11 @@ module MarianaApi
     def oauth_client
       @oauth_client ||= OAuth2::Client.new(
         @partner_credentials[:client_id],
-        '',
+        @partner_credentials[:client_secret],
         site: api_endpoint,
         authorize_url: '/o/authorize',
         token_url: '/o/token',
+        auth_scheme: :request_body,
         token_method: :post_with_query_string,
         logger: (@log_http_transactions ? @logger : nil)
       ) do |faraday_conn|
