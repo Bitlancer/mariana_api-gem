@@ -11,6 +11,7 @@ require 'securerandom'
 module MarianaApi
   class Client
     REQUEST_TIMEOUT = 90
+    REDIRECT_LIMIT = 5
 
     attr_accessor :logger, :log_http_transactions, :subdomain, :on_token_refresh
 
@@ -165,7 +166,9 @@ module MarianaApi
         auth_type: :auto,
         retry_limit: 0,
         retry_delay: 2,
-        retry_attempt: 0
+        retry_attempt: 0,
+        redirect_limit: REDIRECT_LIMIT,
+        redirect_attempt: 0
       }.merge(opts)
 
       auth_type = opts[:auth_type]
@@ -220,6 +223,35 @@ module MarianaApi
           return api_request(method, uri.to_s, opts)
         end
         raise
+      end
+
+      # Net::HTTP does not follow redirects on its own, and a 3xx response comes
+      # back with an empty body that would blow up JSON.parse ("unexpected token
+      # at ''"). Mariana Tek issues these for alias subdomains that point at the
+      # canonical one (e.g. fusionfitness -> sweatlabfitness), so follow the
+      # Location header before parsing -- but only for unauthenticated GETs.
+      # We never re-issue an authenticated request to a redirect target (so a
+      # bearer token can't be leaked, regardless of host) and never replay a
+      # non-GET request against a new location; those raise instead.
+      if response_code >= 300 && response_code < 400 && response['location']
+        unless method == :get && token.nil?
+          raise "Refusing to follow #{response_code} redirect for #{method} #{uri} " \
+                "to #{response['location']} (authenticated or non-GET request)"
+        end
+
+        if opts[:redirect_attempt] >= opts[:redirect_limit]
+          raise "Exceeded redirect limit (#{opts[:redirect_limit]}) for #{method} #{uri}"
+        end
+
+        # The Location carries the full target URL (path + query); don't re-apply
+        # the original query params on top of it.
+        redirect_uri = URI.join(uri.to_s, response['location'])
+        redirect_opts = opts.dup
+        redirect_opts[:redirect_attempt] += 1
+        redirect_opts.delete(:query)
+
+        @logger.info("Following redirect (#{response_code}) to #{redirect_uri}")
+        return api_request(method, redirect_uri.to_s, redirect_opts)
       end
 
       JSON.parse(response.body, symbolize_names: true)

@@ -45,6 +45,46 @@ describe 'Client' do
       expect(stub).to have_been_requested.times(3)
     end
 
+    it 'follows redirects for unauthenticated GET requests' do
+      redirect = stub_request(:get, 'https://test.marianatek.com/api/tenant_brands?page_size=100')
+                 .to_return(status: 301, headers: { 'Location' => 'https://canonical.marianatek.com/api/tenant_brands?page_size=100' })
+
+      target = stub_request(:get, 'https://canonical.marianatek.com/api/tenant_brands?page_size=100')
+               .with { |req| !req.headers.key?('Authorization') }
+               .to_return(body: '{}')
+
+      @client.get('/api/tenant_brands', auth_type: :none)
+
+      expect(redirect).to have_been_requested
+      expect(target).to have_been_requested
+    end
+
+    it 'does not follow redirects for authenticated requests' do
+      redirect = stub_request(:get, 'https://test.marianatek.com/api/users?page_size=100')
+                 .to_return(status: 301, headers: { 'Location' => 'https://canonical.marianatek.com/api/users?page_size=100' })
+
+      expect { @client.get('/api/users', auth_type: :api_key) }
+        .to raise_error(/Refusing to follow/)
+      expect(redirect).to have_been_requested
+    end
+
+    it 'does not follow redirects for non-GET requests' do
+      redirect = stub_request(:post, 'https://test.marianatek.com/api/orders')
+                 .to_return(status: 301, headers: { 'Location' => 'https://canonical.marianatek.com/api/orders' })
+
+      expect { @client.post('/api/orders', body: '{}', auth_type: :none) }
+        .to raise_error(/Refusing to follow/)
+      expect(redirect).to have_been_requested
+    end
+
+    it 'raises when the redirect limit is exceeded' do
+      stub_request(:get, 'https://test.marianatek.com/api/tenant_brands?page_size=100')
+        .to_return(status: 301, headers: { 'Location' => 'https://test.marianatek.com/api/tenant_brands?page_size=100' })
+
+      expect { @client.get('/api/tenant_brands', auth_type: :none) }
+        .to raise_error(/Exceeded redirect limit/)
+    end
+
     it 'retrieves a paginated dataset with includes' do
       stub_request(:get, 'https://test.marianatek.com/api/locations?page_size=10&include=region')
         .to_return(body: File.read('spec/fixtures/locations-page-1.json'))
